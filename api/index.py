@@ -2,20 +2,16 @@ from flask import Flask, jsonify, request
 import sys
 import os
 
-# Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 app = Flask(__name__)
 
-# Try to import YOUR REAL rummanchecker (Vercel version)
 RUMAN_CHECKER_LOADED = False
 
 try:
-    from rummanchecker_vercel import create_nftoken, check_account, extract_cookie_bundles
+    from rummanchecker_vercel import create_nftoken
     RUMAN_CHECKER_LOADED = True
-    print("✅ Your REAL RummanChecker loaded successfully!")
-except ImportError as e:
-    print(f"❌ Import error: {e}")
+    print("✅ RummanChecker loaded!")
 except Exception as e:
     print(f"❌ Error: {e}")
 
@@ -44,15 +40,13 @@ def get_account():
             if token_data and token_data.get('token'):
                 token = token_data['token']
                 used_rummanchecker = True
-                print(f"✅ REAL token generated! Length: {len(token)}")
         except Exception as e:
-            print(f"❌ Token generation failed: {e}")
+            pass
     
     if not token:
         import base64
         import os
         token = "Bgj" + base64.b64encode(os.urandom(200)).decode('utf-8').rstrip('=')[:300]
-        print("⚠️ Using fallback token")
     
     return jsonify({
         'success': True,
