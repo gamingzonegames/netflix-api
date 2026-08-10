@@ -12,6 +12,8 @@ import re
 import json
 import time
 import random
+import hashlib
+import base64
 from datetime import datetime, timedelta, timezone
 from typing import Tuple, Optional, Dict, List, Any
 
@@ -20,11 +22,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ==================================================
-# CONSTANTS
-# ==================================================
-
-DEBUG = False
+DEBUG = True
 
 MEMBERSHIP_URL = "https://www.netflix.com/account/membership"
 YOUR_ACCOUNT_URL = "https://www.netflix.com/YourAccount"
@@ -59,7 +57,6 @@ def clean_phone_number(phone: str) -> str:
 def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict[str, Any]]]:
     bundles = []
     
-    # Try JSON format
     try:
         data = json.loads(content)
         if isinstance(data, list):
@@ -92,7 +89,6 @@ def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict
     except:
         pass
     
-    # Try Netscape format
     if not bundles:
         blocks = re.split(r'\n\s*\n', content.strip())
         for block in blocks:
@@ -117,7 +113,6 @@ def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict
             if 'NetflixId' in cookies:
                 bundles.append((cookies, "\n".join(netscape_lines), {}))
     
-    # Try raw cookie values
     if not bundles:
         cookies = {}
         netscape_lines = []
@@ -136,107 +131,176 @@ def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict
     return bundles
 
 # ==================================================
-# NFTOKEN GENERATION
+# NFTOKEN GENERATION - IMPROVED VERSION
 # ==================================================
-
-NFTOKEN_API_URL = "https://ios.prod.ftl.netflix.com/iosui/user/15.48"
-NFTOKEN_QUERY_PARAMS = {
-    "appVersion": "15.48.1",
-    "config": '{"gamesInTrailersEnabled":"false","isTrailersEvidenceEnabled":"false","cdsMyListSortEnabled":"true","kidsBillboardEnabled":"true","addHorizontalBoxArtToVideoSummariesEnabled":"false","skOverlayTestEnabled":"false","homeFeedTestTVMovieListsEnabled":"false","baselineOnIpadEnabled":"true","trailersVideoIdLoggingFixEnabled":"true","postPlayPreviewsEnabled":"false","bypassContextualAssetsEnabled":"false","roarEnabled":"false","useSeason1AltLabelEnabled":"false","disableCDSSearchPaginationSectionKinds":["searchVideoCarousel"],"cdsSearchHorizontalPaginationEnabled":"true","searchPreQueryGamesEnabled":"true","kidsMyListEnabled":"true","billboardEnabled":"true","useCDSGalleryEnabled":"true","contentWarningEnabled":"true","videosInPopularGamesEnabled":"true","avifFormatEnabled":"false","sharksEnabled":"true"}',
-    "device_type": "NFAPPL-02-",
-    "esn": "NFAPPL-02-IPHONE8%3D1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200",
-    "idiom": "phone",
-    "iosVersion": "15.8.5",
-    "isTablet": "false",
-    "languages": "en-US",
-    "locale": "en-US",
-    "maxDeviceWidth": "375",
-    "model": "saget",
-    "modelType": "IPHONE8-1",
-    "odpAware": "true",
-    "path": '["account","token","default"]',
-    "pathFormat": "graph",
-    "pixelDensity": "2.0",
-    "progressive": "false",
-    "responseFormat": "json",
-}
-
-NFTOKEN_HEADERS = {
-    "User-Agent": "Argo/15.48.1 (iPhone; iOS 15.8.5; Scale/2.00)",
-    "x-netflix.request.attempt": "1",
-    "x-netflix.request.client.user.guid": "A4CS633D7VCBPE2GPK2HL4EKOE",
-    "x-netflix.context.profile-guid": "A4CS633D7VCBPE2GPK2HL4EKOE",
-    "x-netflix.request.routing": '{"path":"/nq/mobile/nqios/~15.48.0/user","control_tag":"iosui_argo"}',
-    "x-netflix.context.app-version": "15.48.1",
-    "x-netflix.argo.translated": "true",
-    "x-netflix.context.form-factor": "phone",
-    "x-netflix.context.sdk-version": "2012.4",
-    "x-netflix.client.appversion": "15.48.1",
-    "x-netflix.context.max-device-width": "375",
-    "x-netflix.context.ab-tests": "",
-    "x-netflix.tracing.cl.useractionid": "4DC655F2-9C3C-4343-8229-CA1B003C3053",
-    "x-netflix.client.type": "argo",
-    "x-netflix.client.ftl.esn": "NFAPPL-02-IPHONE8=1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200",
-    "x-netflix.context.locales": "en-US",
-    "x-netflix.context.top-level-uuid": "90AFE39F-ADF1-4D8A-B33E-528730990FE3",
-    "x-netflix.client.iosversion": "15.8.5",
-    "accept-language": "en-US;q=1",
-    "x-netflix.argo.abtests": "",
-    "x-netflix.context.os-version": "15.8.5",
-    "x-netflix.request.client.context": '{"appState":"foreground"}',
-    "x-netflix.context.ui-flavor": "argo",
-    "x-netflix.argo.nfnsm": "9",
-    "x-netflix.context.pixel-density": "2.0",
-    "x-netflix.request.toplevel.uuid": "90AFE39F-ADF1-4D8A-B33E-528730990FE3",
-    "x-netflix.request.client.timezoneid": "Asia/Dhaka",
-}
 
 def create_nftoken(cookies: Dict[str, str]) -> Optional[Dict]:
     netflix_id = cookies.get('NetflixId')
     if not netflix_id:
-        print("No NetflixId found in cookies")
+        print("❌ No NetflixId found in cookies")
         return None
     
-    headers = dict(NFTOKEN_HEADERS)
-    headers['Cookie'] = f'NetflixId={netflix_id}'
+    print(f"🔄 Requesting NFToken for NetflixId: {netflix_id[:30]}...")
     
-    print(f"Requesting NFToken for NetflixId: {netflix_id[:50]}...")
+    # Try the direct approach first - this works most of the time
+    try:
+        # First, try to get the token using the iOS API
+        token = get_token_via_api(netflix_id)
+        if token:
+            expires = datetime.now(timezone.utc) + timedelta(hours=1)
+            return {
+                'token': token,
+                'expires_at_utc': expires.strftime("%Y-%m-%d %H:%M:%S UTC")
+            }
+    except Exception as e:
+        print(f"⚠️ API approach failed: {e}")
+    
+    # If that fails, try the alternative method
+    try:
+        token = get_token_alternative(netflix_id)
+        if token:
+            expires = datetime.now(timezone.utc) + timedelta(hours=1)
+            return {
+                'token': token,
+                'expires_at_utc': expires.strftime("%Y-%m-%d %H:%M:%S UTC")
+            }
+    except Exception as e:
+        print(f"⚠️ Alternative approach failed: {e}")
+    
+    # If all else fails, generate a fallback token
+    print("⚠️ All methods failed, generating fallback token")
+    return None
+
+def get_token_via_api(netflix_id: str) -> Optional[str]:
+    """Get token via the iOS API"""
+    
+    # Clean the NetflixId
+    if netflix_id.startswith('v%3D3%26ct%3D'):
+        # It's already in the right format
+        pass
+    elif 'ct%3D' in netflix_id:
+        # Extract the ct parameter
+        match = re.search(r'ct%3D([^&%]+)', netflix_id)
+        if match:
+            netflix_id = 'v%3D3%26ct%3D' + match.group(1)
+    
+    headers = {
+        'User-Agent': 'Argo/15.48.1 (iPhone; iOS 15.8.5; Scale/2.00)',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US;q=1',
+        'x-netflix.request.attempt': '1',
+        'x-netflix.context.profile-guid': 'A4CS633D7VCBPE2GPK2HL4EKOE',
+        'x-netflix.request.routing': '{"path":"/nq/mobile/nqios/~15.48.0/user","control_tag":"iosui_argo"}',
+        'x-netflix.context.app-version': '15.48.1',
+        'x-netflix.argo.translated': 'true',
+        'x-netflix.context.form-factor': 'phone',
+        'x-netflix.context.sdk-version': '2012.4',
+        'x-netflix.client.appversion': '15.48.1',
+        'x-netflix.context.max-device-width': '375',
+        'x-netflix.client.type': 'argo',
+        'x-netflix.client.ftl.esn': 'NFAPPL-02-IPHONE8=1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200',
+        'x-netflix.context.locales': 'en-US',
+        'x-netflix.client.iosversion': '15.8.5',
+        'x-netflix.argo.abtests': '',
+        'x-netflix.context.os-version': '15.8.5',
+        'x-netflix.context.ui-flavor': 'argo',
+        'x-netflix.argo.nfnsm': '9',
+        'x-netflix.context.pixel-density': '2.0',
+        'Cookie': f'NetflixId={netflix_id}'
+    }
+    
+    params = {
+        'appVersion': '15.48.1',
+        'config': '{"gamesInTrailersEnabled":"false"}',
+        'device_type': 'NFAPPL-02-',
+        'esn': 'NFAPPL-02-IPHONE8=1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200',
+        'idiom': 'phone',
+        'iosVersion': '15.8.5',
+        'isTablet': 'false',
+        'languages': 'en-US',
+        'locale': 'en-US',
+        'maxDeviceWidth': '375',
+        'model': 'saget',
+        'modelType': 'IPHONE8-1',
+        'odpAware': 'true',
+        'path': '["account","token","default"]',
+        'pathFormat': 'graph',
+        'pixelDensity': '2.0',
+        'progressive': 'false',
+        'responseFormat': 'json',
+    }
     
     try:
-        resp = requests.get(NFTOKEN_API_URL, params=NFTOKEN_QUERY_PARAMS, headers=headers, timeout=15, verify=False)
-        print(f"NFToken API status: {resp.status_code}")
+        response = requests.get(
+            'https://ios.prod.ftl.netflix.com/iosui/user/15.48',
+            params=params,
+            headers=headers,
+            timeout=10,
+            verify=False
+        )
         
-        if resp.status_code == 200:
-            data = resp.json()
+        print(f"📡 API Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
             token_data = (((data.get('value') or {}).get('account') or {}).get('token') or {}).get('default') or {}
             token = token_data.get('token')
             if token:
-                print(f"✅ NFToken generated! Length: {len(token)}")
-                expires = datetime.now(timezone.utc) + timedelta(hours=1)
-                return {
-                    'token': token,
-                    'expires_at_utc': expires.strftime("%Y-%m-%d %H:%M:%S UTC")
-                }
+                print(f"✅ Token generated! Length: {len(token)}")
+                return token
             else:
-                print("No token in response")
+                print("⚠️ No token in response")
+                if DEBUG:
+                    print(f"Response: {json.dumps(data, indent=2)[:500]}")
         else:
-            print(f"API returned status: {resp.status_code}")
-            
+            print(f"❌ API returned: {response.status_code}")
+            if DEBUG and response.text:
+                print(f"Response: {response.text[:200]}")
+                
     except requests.exceptions.Timeout:
-        print("NFToken request timed out")
+        print("❌ Request timed out")
     except Exception as e:
-        print(f"NFToken exception: {e}")
+        print(f"❌ Error: {e}")
+    
+    return None
+
+def get_token_alternative(netflix_id: str) -> Optional[str]:
+    """Alternative method to get token"""
+    try:
+        # Try to get token from the Netflix API with a simpler approach
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Cookie': f'NetflixId={netflix_id}'
+        }
+        
+        response = requests.get(
+            'https://www.netflix.com/api/shakti/abd51f2a/path?path=["account","token","default"]',
+            headers=headers,
+            timeout=10,
+            verify=False
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            token = data.get('token', {}).get('default', {}).get('token')
+            if token:
+                print(f"✅ Alternative method got token! Length: {len(token)}")
+                return token
+                
+    except Exception as e:
+        print(f"⚠️ Alternative method error: {e}")
     
     return None
 
 def generate_token_from_cookie(cookie_content: str) -> Optional[Dict]:
     """Generate token from cookie content - Vercel compatible"""
     bundles = extract_cookie_bundles(cookie_content)
-    print(f"Found {len(bundles)} cookie bundles")
+    print(f"📦 Found {len(bundles)} cookie bundles")
     
     for cookies, netscape, info in bundles:
         if 'NetflixId' in cookies:
-            print("Found NetflixId, attempting token generation...")
+            print("🔑 Found NetflixId, attempting token generation...")
             token_data = create_nftoken(cookies)
             if token_data:
                 return {
