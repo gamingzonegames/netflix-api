@@ -12,42 +12,23 @@ app = Flask(__name__)
 CORS(app)
 
 # ============================================
-# TRY TO IMPORT RUMANCHECKER
+# IMPORT RUMANCHECKER (Vercel-compatible version)
 # ============================================
 
 RummanChecker = None
 IMPORT_ERROR = None
 
 try:
-    # Try to import rummanchecker
-    import importlib.util
-    
-    # Check if rummanchecker.py exists
-    rummanchecker_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rummanchecker.py')
-    
-    if os.path.exists(rummanchecker_path):
-        print(f"✅ Found rummanchecker.py at: {rummanchecker_path}")
-        
-        # Try to import
-        try:
-            from rummanchecker import create_nftoken, extract_cookie_bundles, check_account
-            RummanChecker = True
-            print("✅ RummanChecker imported successfully!")
-        except ImportError as e:
-            IMPORT_ERROR = f"ImportError: {str(e)}"
-            print(f"⚠️ ImportError: {e}")
-            traceback.print_exc()
-        except Exception as e:
-            IMPORT_ERROR = f"Exception: {str(e)}"
-            print(f"⚠️ Exception: {e}")
-            traceback.print_exc()
-    else:
-        IMPORT_ERROR = "rummanchecker.py not found"
-        print(f"⚠️ {IMPORT_ERROR}")
-        
+    from rummanchecker_vercel import create_nftoken, extract_cookie_bundles, generate_token_from_cookie
+    RummanChecker = True
+    print("✅ RummanChecker (Vercel version) imported successfully!")
+except ImportError as e:
+    IMPORT_ERROR = f"ImportError: {str(e)}"
+    print(f"⚠️ ImportError: {e}")
+    traceback.print_exc()
 except Exception as e:
-    IMPORT_ERROR = f"Setup error: {str(e)}"
-    print(f"⚠️ {IMPORT_ERROR}")
+    IMPORT_ERROR = f"Exception: {str(e)}"
+    print(f"⚠️ Exception: {e}")
     traceback.print_exc()
 
 # ============================================
@@ -60,8 +41,7 @@ def home():
         'status': 'running',
         'message': 'Netflix Token API',
         'rummanchecker_loaded': RummanChecker is not None,
-        'import_error': IMPORT_ERROR,
-        'file_exists': os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rummanchecker.py'))
+        'import_error': IMPORT_ERROR
     })
 
 @app.route('/get-netflix-account', methods=['GET'])
@@ -75,6 +55,7 @@ def get_account():
             'error': 'No NetflixId provided'
         }), 400
     
+    # Build cookies dict
     cookies = {'NetflixId': netflix_id}
     
     token = None
@@ -133,7 +114,7 @@ def get_account():
     })
 
 def generate_fallback_token(netflix_id):
-    """Fallback token generator"""
+    """Fallback token generator if rummanchecker fails"""
     import time
     import base64
     import hashlib
@@ -164,19 +145,19 @@ def health():
     return jsonify({
         'status': 'running',
         'rummanchecker_loaded': RummanChecker is not None,
-        'import_error': IMPORT_ERROR,
-        'file_exists': os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rummanchecker.py'))
+        'import_error': IMPORT_ERROR
     })
 
 @app.route('/debug', methods=['GET'])
 def debug():
     """Debug endpoint to see what's happening"""
     import sys
+    files = os.listdir(os.path.dirname(os.path.abspath(__file__)))
     return jsonify({
         'python_version': sys.version,
         'sys_path': sys.path,
         'cwd': os.getcwd(),
-        'files_in_dir': os.listdir(os.path.dirname(os.path.abspath(__file__))),
+        'files_in_dir': files,
         'rummanchecker_loaded': RummanChecker is not None,
         'import_error': IMPORT_ERROR
     })
