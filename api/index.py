@@ -2,15 +2,15 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-@app.route('/', methods=['GET'])
+@app.route('/')
 def home():
     return jsonify({"status": "ok", "message": "API is running"})
 
-@app.route('/health', methods=['GET'])
+@app.route('/health')
 def health():
     return jsonify({"status": "ok"})
 
-@app.route('/get-netflix-account', methods=['GET'])
+@app.route('/get-netflix-account')
 def get_account():
     netflix_id = request.args.get('netflix_id', '')
     email = request.args.get('email', 'N/A')
@@ -36,3 +36,7 @@ def get_account():
         'used_rummanchecker': False,
         'message': 'Account retrieved successfully'
     })
+
+# This is required for Vercel
+if __name__ == '__main__':
+    app.run()
