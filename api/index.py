@@ -1,10 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return jsonify({"status": "ok", "message": "API is running"})
+    return jsonify({"status": "ok"})
 
 @app.route('/health')
 def health():
@@ -36,7 +36,3 @@ def get_account():
         'used_rummanchecker': False,
         'message': 'Account retrieved successfully'
     })
-
-# This is required for Vercel
-if __name__ == '__main__':
-    app.run()
