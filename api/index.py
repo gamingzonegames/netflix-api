@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify
-import json
 
 app = Flask(__name__)
 
@@ -17,10 +16,7 @@ def get_account():
     email = request.args.get('email', 'N/A')
     country = request.args.get('country', 'US')
     
-    # Generate a token
-    import hashlib
     import base64
-    import time
     import os
     
     token = "Bgj" + base64.b64encode(os.urandom(200)).decode('utf-8').rstrip('=')[:300]
@@ -40,6 +36,3 @@ def get_account():
         'used_rummanchecker': False,
         'message': 'Account retrieved successfully'
     })
-
-# This is required for Vercel
-app = app
