@@ -12,23 +12,24 @@ app = Flask(__name__)
 CORS(app)
 
 # ============================================
-# IMPORT RUMANCHECKER (Vercel-compatible version)
+# IMPORT RUMANCHECKER
 # ============================================
 
 RummanChecker = None
 IMPORT_ERROR = None
 
 try:
+    # Try to import from the same directory
     from rummanchecker_vercel import create_nftoken, extract_cookie_bundles, generate_token_from_cookie
     RummanChecker = True
-    print("✅ RummanChecker (Vercel version) imported successfully!")
+    print("✅ RummanChecker imported successfully!")
 except ImportError as e:
     IMPORT_ERROR = f"ImportError: {str(e)}"
-    print(f"⚠️ ImportError: {e}")
+    print(f"⚠️ {IMPORT_ERROR}")
     traceback.print_exc()
 except Exception as e:
     IMPORT_ERROR = f"Exception: {str(e)}"
-    print(f"⚠️ Exception: {e}")
+    print(f"⚠️ {IMPORT_ERROR}")
     traceback.print_exc()
 
 # ============================================
@@ -44,10 +45,19 @@ def home():
         'import_error': IMPORT_ERROR
     })
 
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        'status': 'running',
+        'rummanchecker_loaded': RummanChecker is not None,
+        'import_error': IMPORT_ERROR
+    })
+
 @app.route('/get-netflix-account', methods=['GET'])
 def get_account():
-    username = request.args.get('username', 'anonymous')
     netflix_id = request.args.get('netflix_id', '')
+    email = request.args.get('email', 'N/A')
+    country = request.args.get('country', 'US')
     
     if not netflix_id:
         return jsonify({
@@ -66,7 +76,7 @@ def get_account():
     # Try rummanchecker
     if RummanChecker:
         try:
-            print(f"🔄 Generating token with rummanchecker...")
+            print(f"🔄 Generating token for: {netflix_id[:30]}...")
             token_data = create_nftoken(cookies)
             
             if token_data and token_data.get('token'):
@@ -92,10 +102,6 @@ def get_account():
         token = generate_fallback_token(netflix_id)
         expires = '2026-08-11 12:00:00 UTC'
     
-    email = request.args.get('email', 'N/A')
-    country = request.args.get('country', 'US')
-    payment = request.args.get('payment', 'CC')
-    
     return jsonify({
         'success': True,
         'account': {
@@ -103,7 +109,7 @@ def get_account():
             'phone': 'N/A',
             'country': country,
             'plan': 'Premium',
-            'payment_method': payment,
+            'payment_method': 'CC',
             'profiles': '5'
         },
         'token': token,
@@ -114,7 +120,7 @@ def get_account():
     })
 
 def generate_fallback_token(netflix_id):
-    """Fallback token generator if rummanchecker fails"""
+    """Fallback token generator"""
     import time
     import base64
     import hashlib
@@ -140,23 +146,19 @@ def generate_fallback_token(netflix_id):
     
     return token[:300]
 
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({
-        'status': 'running',
-        'rummanchecker_loaded': RummanChecker is not None,
-        'import_error': IMPORT_ERROR
-    })
-
 @app.route('/debug', methods=['GET'])
 def debug():
     """Debug endpoint to see what's happening"""
     import sys
-    files = os.listdir(os.path.dirname(os.path.abspath(__file__)))
+    import os
+    
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    files = os.listdir(current_dir) if os.path.exists(current_dir) else []
+    
     return jsonify({
         'python_version': sys.version,
-        'sys_path': sys.path,
         'cwd': os.getcwd(),
+        'current_dir': current_dir,
         'files_in_dir': files,
         'rummanchecker_loaded': RummanChecker is not None,
         'import_error': IMPORT_ERROR
