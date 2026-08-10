@@ -2,22 +2,22 @@ from flask import Flask, jsonify, request
 import sys
 import os
 
-# Add current directory to path so we can import rummanchecker
+# Add current directory to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 app = Flask(__name__)
 
-# Try to import rummanchecker
+# Try to import YOUR REAL rummanchecker (Vercel version)
+RUMAN_CHECKER_LOADED = False
+
 try:
-    from rummanchecker import create_nftoken, extract_cookie_bundles, check_account
+    from rummanchecker_vercel import create_nftoken, check_account, extract_cookie_bundles
     RUMAN_CHECKER_LOADED = True
-    print("✅ RummanChecker loaded successfully!")
+    print("✅ Your REAL RummanChecker loaded successfully!")
 except ImportError as e:
-    RUMAN_CHECKER_LOADED = False
-    print(f"❌ RummanChecker not loaded: {e}")
+    print(f"❌ Import error: {e}")
 except Exception as e:
-    RUMAN_CHECKER_LOADED = False
-    print(f"❌ RummanChecker error: {e}")
+    print(f"❌ Error: {e}")
 
 @app.route('/')
 def home():
@@ -36,7 +36,6 @@ def get_account():
     token = None
     used_rummanchecker = False
     
-    # Try to use real rummanchecker
     if RUMAN_CHECKER_LOADED and netflix_id:
         try:
             cookies = {'NetflixId': netflix_id}
@@ -45,11 +44,10 @@ def get_account():
             if token_data and token_data.get('token'):
                 token = token_data['token']
                 used_rummanchecker = True
-                print(f"✅ Real token generated! Length: {len(token)}")
+                print(f"✅ REAL token generated! Length: {len(token)}")
         except Exception as e:
-            print(f"❌ Rummanchecker failed: {e}")
+            print(f"❌ Token generation failed: {e}")
     
-    # Fallback if rummanchecker failed
     if not token:
         import base64
         import os
